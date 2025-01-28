@@ -1,108 +1,187 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const User = require("../models/user");
+const Role = require("../models/Role");
+const nodemailer = require("nodemailer"); // For password reset emails
+const { validationResult } = require("express-validator");
+// Secret for JWT (should be stored in .env in a real app)
+const JWT_SECRET = "your-secret-key";
 
-// User Registration
-exports.register = async (req, res) => {
+// Login
+const login = async (req, res) => {
+  const { username, password } = req.body;
+
   try {
-    const { email, password, role, additionalFields } = req.body;
-
-    // Check for role-specific fields
-    if (role === "manufacturer" && !additionalFields.companyName) {
-      return res
-        .status(400)
-        .json({ message: "Manufacturer must provide a company name." });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await User.create({
-      email,
-      password: hashedPassword,
-      role,
-      ...additionalFields,
+    const user = await User.findOne({
+      where: { username },
+      include: Role, // Including the role in the response
     });
 
-    res.status(201).json({ message: "User registered successfully", user });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-// User Login
-exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(404).json({ message: "User not found" });
-
+    // Check if password matches
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
+    if (!isMatch) {
       return res.status(401).json({ message: "Invalid credentials" });
+    }
 
+    // Generate JWT Token
     const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET,
+      { userId: user.id, role: user.Role.name },
+      JWT_SECRET,
       {
         expiresIn: "1h",
       }
     );
 
-    res.status(200).json({ message: "Login successful", token });
+    res.json({
+      token,
+      user: { name: user.name, username: user.username, role: user.Role.name },
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Password Recovery
-exports.passwordRecovery = async (req, res) => {
+// Register
+const register = async (req, res) => {
+  const { name, username, email, password, role } = req.body;
+
   try {
-    const { email } = req.body;
+    // Validate role
+    const userRole = await Role.findOne({ where: { name: role } });
+    if (!userRole) {
+      return res.status(400).json({ message: "Invalid role" });
+    }
 
+    // Check if username or email already exists
+    const existingUser = await User.findOne({
+      where: { [Op.or]: [{ username }, { email }] },
+    });
+
+    if (existingUser) {
+      return res
+        .status(400)
+        .json({ message: "Username or email already in use" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create user
+    const newUser = await User.create({
+      name,
+      username,
+      email,
+      password: hashedPassword,
+      role_id: userRole.id,
+    });
+
+    // Generate JWT Token
+    const token = jwt.sign(
+      { userId: newUser.id, role: userRole.name },
+      JWT_SECRET,
+      {
+        expiresIn: "1h",
+      }
+    );
+
+    res.status(201).json({
+      token,
+      user: {
+        name: newUser.name,
+        username: newUser.username,
+        role: userRole.name,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+// Reset Password
+const resetPassword = async (req, res) => {
+  const { email } = req.body;
+
+  try {
     const user = await User.findOne({ where: { email } });
-    if (!user) return res.status(404).json({ message: "User not found" });
 
-    // Generate recovery token (for simplicity, using JWT here)
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, {
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    // Generate a reset token (could be JWT or random string)
+    const resetToken = jwt.sign({ userId: user.id }, JWT_SECRET, {
       expiresIn: "15m",
     });
 
-    // Here you'd send an email with the recovery link (e.g., /reset-password/:token)
-    res.status(200).json({ message: "Password recovery email sent", token });
+    // Send reset link via email
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: "your-email@gmail.com",
+        pass: "your-email-password",
+      },
+    });
+
+    const resetLink = `http://your-frontend-url.com/reset-password/${resetToken}`;
+
+    await transporter.sendMail({
+      to: user.email,
+      subject: "Password Reset",
+      text: `Click the following link to reset your password: ${resetLink}`,
+    });
+
+    res.json({ message: "Password reset link sent" });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
-// Social Login
-exports.socialLogin = async (req, res) => {
-  try {
-    const { provider, providerId, email, name } = req.body;
+// Social Login (Assuming we use OAuth)
+const socialLogin = async (req, res) => {
+  const { socialId, provider } = req.body;
 
-    // Check if user exists
-    let user = await User.findOne({ where: { email } });
+  try {
+    // Assuming we fetch user from social provider
+    const user = await User.findOne({ where: { socialId, provider } });
 
     if (!user) {
-      // Register the user if not found
-      user = await User.create({
-        email,
-        name,
-        role: "buyer",
-        provider,
-        providerId,
-      });
+      return res.status(404).json({ message: "User not found" });
     }
 
     const token = jwt.sign(
-      { id: user.id, role: user.role },
-      process.env.JWT_SECRET,
+      { userId: user.id, role: user.Role.name },
+      JWT_SECRET,
       {
         expiresIn: "1h",
       }
     );
 
-    res.status(200).json({ message: "Social login successful", token });
+    res.json({
+      token,
+      user: { name: user.name, username: user.username, role: user.Role.name },
+    });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
   }
+};
+
+// Logout (Simply delete token on client side)
+const logout = (req, res) => {
+  res.json({ message: "Logged out successfully" });
+};
+
+module.exports = {
+  login,
+  register,
+  resetPassword,
+  socialLogin,
+  logout,
 };
