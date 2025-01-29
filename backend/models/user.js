@@ -1,7 +1,7 @@
 const { DataTypes, UUIDV4 } = require("sequelize");
 const sequelize = require("../config/database");
 const Role = require("./Role"); // Import Role model
-
+const { ROLES } = require("../config/constant");
 const User = sequelize.define(
   "User",
   {
@@ -36,11 +36,29 @@ const User = sequelize.define(
         model: Role,
         key: "id",
       },
+      defaultValue: async function () {
+        const buyerRole = await Role.findOne({
+          where: { role_name: ROLES.Buyer },
+        });
+        return buyerRole ? buyerRole.id : null;
+      },
     },
   },
   {
     timestamps: true,
+    hooks: {
+      beforeCreate: async (user) => {
+        if (!user.role_id) {
+          const buyerRole = await Role.findOne({
+            where: { role_name: ROLES.Buyer },
+          });
+          if (buyerRole) user.role_id = buyerRole.id;
+        }
+      },
+    },
   }
 );
+
+User.belongsTo(Role, { foreignKey: "role_id", as: "Role" });
 
 module.exports = User;

@@ -1,9 +1,12 @@
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const { Op } = require("sequelize");
+
 const User = require("../models/user");
 const Role = require("../models/Role");
 const nodemailer = require("nodemailer"); // For password reset emails
 const { validationResult } = require("express-validator");
+const { ROLES } = require("../config/constant");
 // Secret for JWT (should be stored in .env in a real app)
 const JWT_SECRET = "your-secret-key";
 
@@ -14,7 +17,10 @@ const login = async (req, res) => {
   try {
     const user = await User.findOne({
       where: { username },
-      include: Role, // Including the role in the response
+      include: {
+        model: Role,
+        as: "Role", // Ensure this matches the alias used in the User model association
+      },
     });
 
     if (!user) {
@@ -29,16 +35,18 @@ const login = async (req, res) => {
 
     // Generate JWT Token
     const token = jwt.sign(
-      { userId: user.id, role: user.Role.name },
-      JWT_SECRET,
-      {
-        expiresIn: "1h",
-      }
+      { userId: user.id, role: user.Role.role_name }, // Use role_name from Role model
+      process.env.JWT_SECRET,
+      { expiresIn: "1h" }
     );
 
     res.json({
       token,
-      user: { name: user.name, username: user.username, role: user.Role.name },
+      user: {
+        name: user.name,
+        username: user.username,
+        role: user.Role.role_name, // Correct access to role_name
+      },
     });
   } catch (error) {
     console.error(error);
@@ -46,15 +54,15 @@ const login = async (req, res) => {
   }
 };
 
-// Register
 const register = async (req, res) => {
-  const { name, username, email, password, role } = req.body;
+  const { name, username, email, password } = req.body; // No role in request
 
   try {
-    // Validate role
-    const userRole = await Role.findOne({ where: { name: role } });
+    // Set default role as BUYER (if no role is provided)
+    const userRole = await Role.findOne({ where: { role_name: ROLES.Buyer } });
+
     if (!userRole) {
-      return res.status(400).json({ message: "Invalid role" });
+      return res.status(500).json({ message: "Default role not found" });
     }
 
     // Check if username or email already exists
@@ -71,30 +79,32 @@ const register = async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create user
+    // Create user with default BUYER role
     const newUser = await User.create({
       name,
       username,
       email,
       password: hashedPassword,
-      role_id: userRole.id,
+      role_id: userRole.id, // Assign default role
     });
 
     // Generate JWT Token
     const token = jwt.sign(
-      { userId: newUser.id, role: userRole.name },
-      JWT_SECRET,
+      { userId: newUser.id, role: userRole.role_name }, // Use role_name
+      process.env.JWT_SECRET, // Use secret from environment
       {
         expiresIn: "1h",
       }
     );
 
+    // Send response with token and user info
     res.status(201).json({
       token,
       user: {
+        id: newUser.id,
         name: newUser.name,
         username: newUser.username,
-        role: userRole.name,
+        role: userRole.role_name,
       },
     });
   } catch (error) {

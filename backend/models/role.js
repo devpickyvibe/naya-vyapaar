@@ -21,18 +21,25 @@ const Role = sequelize.define(
       allowNull: false,
     },
     role_name: {
-      type: DataTypes.ENUM, // Use ENUM to restrict values
-      values: Object.values(exports.ROLES), // Allowed values from the ROLES object
+      type: DataTypes.ENUM(...Object.values(exports.ROLES)), // Correct ENUM definition
       allowNull: false,
-      unique: true, // Ensure the role_name is unique
+      unique: true,
     },
     admin_granted_users: {
-      type: DataTypes.JSON, // Store granted users as a JSON array of user IDs
-      defaultValue: [], // Default empty array
+      type: DataTypes.TEXT, // Store as JSON string
+      allowNull: true,
+      defaultValue: "[]", // Default empty array as string
+      get() {
+        const value = this.getDataValue("admin_granted_users");
+        return value ? JSON.parse(value) : [];
+      },
+      set(value) {
+        this.setDataValue("admin_granted_users", JSON.stringify(value || []));
+      },
     },
   },
   {
-    timestamps: true, // Automatically add createdAt and updatedAt fields
+    timestamps: true,
   }
 );
 

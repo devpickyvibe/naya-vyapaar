@@ -35,14 +35,9 @@ const setupDB = async () => {
     // RFQ belongs to Manufacturer (One-to-One relationship)
     RFQ.belongsTo(User, { foreignKey: "manufacturer_id", as: "manufacturer" });
     // Establish relationships
-    Role.belongsToMany(User, {
-      as: "Roles", // A junction table to associate users with roles
-      foreignKey: "role_id",
-    });
-    User.belongsToMany(Role, {
-      as: "Roles",
-      foreignKey: "user_id",
-    });
+    User.belongsTo(Role, { foreignKey: "role_id", as: "Role" });
+    Role.hasMany(User, { foreignKey: "role_id", as: "Users" });
+
     Session.belongsTo(User, { foreignKey: "userId" });
     User.belongsTo(Role, { foreignKey: "role_id" }); // Establish foreign key relationship
     // AccessLog relationships
